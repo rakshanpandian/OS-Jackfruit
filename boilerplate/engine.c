@@ -128,6 +128,8 @@ typedef struct {
     container_record_t *containers;
 } supervisor_ctx_t;
 
+static supervisor_ctx_t *g_ctx = NULL;
+
 static void usage(const char *prog)
 {
     fprintf(stderr,
@@ -289,9 +291,22 @@ static void bounded_buffer_begin_shutdown(bounded_buffer_t *buffer)
  */
 int bounded_buffer_push(bounded_buffer_t *buffer, const log_item_t *item)
 {
-    (void)buffer;
-    (void)item;
-    return -1;
+pthread_mutex_lock(&buffer->mutex);
+    while (buffer->count == LOG_BUFFER_CAPACITY && !buffer->shutting_down) {
+        pthread_cond_wait(&buffer->not_full, &buffer->mutex);
+    }
+    if (buffer->shutting_down) {
+        pthread_mutex_unlock(&buffer->mutex);
+        return -1;
+    }
+
+    buffer->items[buffer->tail] = *item;
+    buffer->tail = (buffer->tail + 1) % LOG_BUFFER_CAPACITY;
+    buffer->count++;
+
+    pthread_cond_signal(&buffer->not_empty);
+    pthread_mutex_unlock(&buffer->mutex);
+    return 0;
 }
 
 /*
@@ -305,9 +320,23 @@ int bounded_buffer_push(bounded_buffer_t *buffer, const log_item_t *item)
  */
 int bounded_buffer_pop(bounded_buffer_t *buffer, log_item_t *item)
 {
-    (void)buffer;
-    (void)item;
-    return -1;
+    pthread_mutex_lock(&buffer->mutex);
+    while (buffer->count == 0 && !buffer->shutting_down) {
+        pthread_cond_wait(&buffer->not_empty, &buffer->mutex);
+    }
+    
+    if (buffer->count == 0 && buffer->shutting_down) {
+        pthread_mutex_unlock(&buffer->mutex);
+        return -1;
+    }
+
+    *item = buffer->items[buffer->head];
+    buffer->head = (buffer->head + 1) % LOG_BUFFER_CAPACITY;
+    buffer->count--;
+
+    pthread_cond_signal(&buffer->not_full);
+    pthread_mutex_unlock(&buffer->mutex);
+    return 0;
 }
 
 /*
@@ -321,7 +350,19 @@ int bounded_buffer_pop(bounded_buffer_t *buffer, log_item_t *item)
  */
 void *logging_thread(void *arg)
 {
-    (void)arg;
+    supervisor_ctx_t *ctx = (supervisor_ctx_t *)arg;
+    log_item_t item;
+    mkdir(LOG_DIR, 0755);
+
+    while (bounded_buffer_pop(&ctx->log_buffer, &item) == 0) {
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "%s/%s.log", LOG_DIR, item.container_id);
+        int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+        if (fd >= 0) {
+            write(fd, item.data, item.length);
+            close(fd);
+        }
+    }
     return NULL;
 }
 
@@ -338,7 +379,31 @@ void *logging_thread(void *arg)
  */
 int child_fn(void *arg)
 {
-    (void)arg;
+    child_config_t *config = (child_config_t *)arg;
+
+    // Isolate hostname and mount tree
+    sethostname(config->id, strlen(config->id));
+    mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, NULL);
+
+    // Chroot into the container rootfs
+    if (chroot(config->rootfs) != 0 || chdir("/") != 0) {
+        perror("chroot failed");
+        return 1;
+    }
+
+    // Mount /proc so tools like 'ps' work inside
+    mount("proc", "/proc", "proc", 0, NULL);
+
+    // Set scheduling priority
+    setpriority(PRIO_PROCESS, 0, config->nice_value);
+
+    // Path A: Redirect stdout/stderr to the supervisor's pipe
+    dup2(config->log_write_fd, STDOUT_FILENO);
+    dup2(config->log_write_fd, STDERR_FILENO);
+    close(config->log_write_fd);
+
+    char *args[] = {"/bin/sh","-c",config->command,NULL};
+    execv("/bin/sh", args);
     return 1;
 }
 
@@ -437,9 +502,21 @@ static int run_supervisor(const char *rootfs)
  */
 static int send_control_request(const control_request_t *req)
 {
-    (void)req;
-    fprintf(stderr, "Control-plane client path not implemented.\n");
-    return 1;
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    struct sockaddr_un addr = {.sun_family = AF_UNIX};
+    strncpy(addr.sun_path, CONTROL_PATH, sizeof(addr.sun_path) - 1);
+
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        perror("Could not connect to supervisor (is it running?)");
+        return 1;
+    }
+
+    write(fd, req, sizeof(*req));
+    control_response_t res;
+    read(fd, &res, sizeof(res));
+    printf("%s\n", res.message);
+    close(fd);
+    return res.status;
 }
 
 static int cmd_start(int argc, char *argv[])
