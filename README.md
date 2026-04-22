@@ -286,10 +286,10 @@ In the CPU-bound vs I/O-bound experiment, the I/O-bound process spends most of i
 
 **Raw measurements:**
 
-| Container | Nice value | Observed completion time |
-|-----------|-----------|--------------------------|
-| highpri   | -10       | 20 seconds              |
-| lowpri    | +10       | 20 seconds              |
+| Container | Nice value | Observed completion time | CPU utilization
+|-----------|-----------|--------------------------|-----------|
+| highpri   | -10       | 20 seconds              | 26.4%      |
+| lowpri    | +10       | 20 seconds              | 24.1%      |
 
 **Observations:** Both containers completed in approximately 20 seconds.
-Despite the priority difference, no significant difference in completion time was observed. This is because on a multi-core system, they run in parallel, so differences in nice value mainly affect CPU share, not total completion time.
+Despite the priority difference, no significant difference in completion time was observed. This is because on a multi-core system, they run in parallel, so differences in nice value mainly affect CPU share, not total completion time. The important difference is in the share of CPU each process gets: higher priority gets higher CPU share, lower priority gets lower CPU share!
