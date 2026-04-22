@@ -207,6 +207,7 @@ make clean
 *`ps aux | grep engine` shows no live engine supervisor process. 
 `dmesg | tail -15` shows all monitored entries cleanly removed as containers exited. 
 After `sudo rmmod monitor`, `dmesg | tail -5` confirms "Module unloaded" with no leaked list entries. No zombie processes were present at any point during shutdown.*
+*Proper cleanup completed by reaping processes, shutting down threads, freeing buffers, closing descriptors, and clearing kernel module state.*
 
 ---
 
