@@ -291,20 +291,3 @@ In the CPU-bound vs I/O-bound experiment, the I/O-bound process spends most of i
 
 **Observations:** Both containers completed in approximately 20 seconds.
 Despite the priority difference, no significant difference in completion time was observed. This is because on a multi-core system, they run in parallel, so differences in nice value mainly affect CPU share, not total completion time.
-
----
-
-### Experiment 2: CPU-bound vs I/O-bound at equal priority
-
-**Setup:** One container running `cpu_hog 30` and one running `io_pulse 60 200` (60 iterations, 200 ms sleep between each), both at default nice value (0), started simultaneously.
-
-**Raw measurements:**
-
-| Container | Workload type | CPU% (observed via top) | Completion |
-|-----------|--------------|------------------------|------------|
-| cpu1      | CPU-bound    | ~25%                  | 20 seconds |
-| io1       | I/O-bound    | ~0-5%                  | 20 seconds |
-
-**Observations:** `cpu_hog` consumed a significant share of CPU (~25% on a multi-core system) while `io_pulse` used minimal CPU (~0-5%), spending most of its time sleeping. When `io_pulse` woke from `usleep`, it was scheduled quickly despite `cpu_hog` being runnable. Both workloads completed in similar wall-clock time.
-
-**Analysis:** Because `io_pulse` spends most of its time sleeping, its CFS virtual runtime advances very slowly. When it wakes, it has a lower virtual runtime than CPU-bound tasks and is therefore scheduled quickly. I/O-bound processes accumulate less virtual runtime and are naturally prioritised when runnable, leading to good responsiveness without explicit priority boosting.
