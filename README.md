@@ -125,7 +125,9 @@ dmesg -w | grep container_monitor
 # CPU-bound vs I/O-bound at same priority
 sudo ./engine start cpu1 ./rootfs-alpha /cpu_hog 30
 sudo ./engine start io1  ./rootfs-beta  '/io_pulse 50 100'
-
+```
+-or-
+```bash
 # CPU-bound workloads with different nice values
 sudo ./engine start highpri ./rootfs-alpha '/cpu_hog 30' --nice -10
 sudo ./engine start lowpri  ./rootfs-beta  '/cpu_hog 30' --nice 10
